@@ -177,9 +177,9 @@ create_ssh_key() {
 
 clear
 reset_screen
-change_shell
-setup_homebrew
+# change_shell
+# setup_homebrew
 install_software
-setup_ssh_key
-reset_screen
+# setup_ssh_key
+# reset_screen
 fancy_echo "****** setup complete."

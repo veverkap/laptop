@@ -142,6 +142,14 @@ install_gnupg() {
   fi
 }
 
+setup_git() {
+  current_email=$(git config --global user.email)
+  if [ -n "$current_email" ]; then
+    echo "    - Git is configured globally to use '$current_email' as your commit email."
+  else
+    echo "BLAH"
+  fi
+}
 # Updates GPG config
 gpg_config() {
   echo "  - Updating GPG config"
@@ -331,6 +339,8 @@ install_docker_for_mac() {
       sudo chmod 644 /Library/LaunchDaemons/com.docker.vmnetd.plist
       sudo launchctl load /Library/LaunchDaemons/com.docker.vmnetd.plist
     fi
+
+    open /Applications/Docker.app
   else
     echo "    - Already using Docker For Mac. Skipping ..."
   fi
@@ -363,51 +373,36 @@ default_writes() {
 
 # Installs software, including git, docker-toolbox, slack and iterm2
 install_software() {
-  output="> Installing Base Software\n"
-
-  output="$output  - Installing mas\n"
-  echo -e $output
-  brew_confirm_install_or_upgrade 'mas'
-  reset_screen
-
-  output="$output  - Installing XCode\n"
+  output="> Installing Required Base Software\n"
   echo -e $output
 
-  if ! mas_is_installed '497799835'; then
+  # HOMEBREW_REQUIRED=(git jq mas socat)
+  # for i in ${HOMEBREW_REQUIRED[@]}; do
+  #   output="$output  - Installing ${i}\n"
+  #   echo -e $output
+  #   brew_install_or_upgrade "$i"
+  #   reset_screen
+  # done
 
-    read -r -p "    - Would you like to install XCode? [y/N] " response
-
-    case "$response" in
-    [yY][eE][sS] | [yY])
-      mas install 497799835
-      ;;
-    *)
-      echo "    - Not installing XCode"
-      ;;
-    esac
-  else
-    echo "    - XCode already installed. Skipping ..."
-  fi
-  reset_screen
-
-  output="$output  - Installing git\n"
+  output="$output  - Setting up git\n"
+  setup_git
   echo -e $output
-  brew_confirm_install_or_upgrade 'git'
-  reset_screen
-
-  output="$output  - Installing GNUPGP\n"
+  exit
+  output="$output  - Installing Docker for Mac\n"
   echo -e $output
-  install_gnupg
-  reset_screen
+  install_docker_for_mac
+
+  output="> Installing Optional Base Software\n"
+  echo -e $output
 
   output="$output  - Installing iterm2\n"
   echo -e $output
   brew_cask_install_or_upgrade 'iterm2'
   reset_screen
 
-  output="$output  - Installing jq\n"
+  output="$output  - Installing GNUPGP\n"
   echo -e $output
-  brew_confirm_install_or_upgrade 'jq'
+  install_gnupg
   reset_screen
 
   output="$output  - Installing VS Code\n"
@@ -418,11 +413,6 @@ install_software() {
   output="$output  - Installing Beyond Compare\n"
   echo -e $output
   brew_cask_install_or_upgrade 'beyond-compare'
-  reset_screen
-
-  output="$output  - Installing Docker for Mac\n"
-  echo -e $output
-  install_docker_for_mac
   reset_screen
 
   output="$output  - Installing rbenv\n"

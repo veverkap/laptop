@@ -77,6 +77,21 @@ brew_cask_install_or_upgrade() {
   fi
 }
 
+# This forces installation of a program or upgrades it if it is already installed
+brew_install_or_upgrade() {
+  if brew_is_installed "$1"; then
+    if brew_is_upgradable "$1"; then
+      echo "    - Upgrading $1 ..."
+      brew upgrade "$@"
+    else
+      echo "    - Already using the latest version of $1. Skipping ..."
+    fi
+  else
+    echo "    - Installing $1 ..."
+    brew install "$@"
+  fi
+}
+
 # This installs a program or upgrades it if it is already installed
 brew_confirm_install_or_upgrade() {
   if brew_is_installed "$1"; then
