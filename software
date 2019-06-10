@@ -1,0 +1,460 @@
+#!/bin/bash
+bold=$(tput bold)
+normal=$(tput sgr0)
+
+pushd() {
+  command pushd "$@" >/dev/null
+}
+
+popd() {
+  command popd "$@" >/dev/null
+}
+
+# Pulls down git repo or fetches existing
+git_clone_or_update() {
+  local git_url="git@github.com:flatiron-labs/$1.git"
+  echo "  - Cloning $git_url"
+  local DIRECTORY="$PWD/../$1"
+
+  if [ ! -d "$DIRECTORY" ]; then
+    echo "    - $1 does not exist, cloning"
+    pushd ..
+    git clone $git_url
+    popd
+  else
+    echo "    - Already exists - fetching origin"
+    pushd $DIRECTORY
+    git fetch origin
+    git pull origin
+    popd
+  fi
+}
+
+# Iterates through repos and clones them in the parent directory
+clone_all_repos() {
+  output="cloning repos ...\n"
+  for i in "${repos[@]}"; do
+    output="$output  - cloning $i\n"
+    echo -e $output
+    git_clone_or_update "$i"
+    reset_screen
+  done
+
+  repos_cloned=true
+  reset_screen
+}
+
+create_zshrc_and_set_it_as_shell_file() {
+  if [ ! -f "$HOME/.zshrc" ]; then
+    echo "Creating .zshrc"
+    touch "$HOME/.zshrc"
+  fi
+
+  shell_file="$HOME/.zshrc"
+}
+create_bash_profile_and_set_it_as_shell_file() {
+  if [ ! -f "$HOME/.bashrc" ]; then
+    touch "$HOME/.bashrc"
+  fi
+
+  shell_file="$HOME/.bashrc"
+}
+
+append_to_file() {
+  local file="$1"
+  local text="$2"
+
+  if ! grep -qs "^$text$" "$file"; then
+    printf "\n%s\n" "$text" >>"$file"
+  fi
+}
+
+change_shell_to_zsh() {
+  fancy_echo "Please enter your password to continue."
+  echo "Note that there won't be visual feedback when you type your password."
+  echo "Type it slowly and press return, or press control-c to cancel the switch to zsh and exit the script."
+  create_zshrc_and_set_it_as_shell_file
+  chsh -s "$(which zsh)" | echo
+  echo "Note that you can always switch back to ${bold}bash${normal} if you change your mind."
+  echo "Your shell has been changed and will be reflected on your next login."
+}
+
+change_shell() {
+  case "$SHELL" in
+  */zsh)
+    :
+    create_zshrc_and_set_it_as_shell_file
+    ;;
+  *)
+    create_bash_profile_and_set_it_as_shell_file
+    echo ""
+    echo "  Want to switch your shell from the default ${bold}bash${normal} to ${bold}zsh${normal}?"
+    echo "  Both work fine for development, and ${bold}zsh${normal} has some extra features for customization and tab completion."
+    echo "  If you aren't sure or don't care, we recommend ${bold}zsh${normal}."
+    echo ""
+    echo -n "  Press ${bold}y${normal} to switch to zsh, ${bold}n${normal} to keep bash: "
+    read -r -n 1 response
+    if [ "$response" = "y" ]; then
+      echo ""
+      fancy_echo "=== Getting ready to change your shell to zsh. ==="
+      if ! grep -qs "$(which zsh)" /etc/shells; then
+        echo "It looks like your version of zsh is missing from ${bold}/etc/shells${normal}."
+        echo "It must be added there manually before your shell can be changed."
+        echo "Open ${bold}/etc/shells${normal} with your favorite text editor,"
+        echo "then add ${bold}$(which zsh)${normal} in a new line and save the file."
+        echo -n "Once you've added it, press ${bold}y${normal} to continue, or ${bold}n${normal} to cancel: "
+        read -r -n 1 response
+        if [ "$response" = "y" ]; then
+          change_shell_to_zsh
+        else
+          fancy_echo "Shell will not be changed."
+        fi
+      else
+        change_shell_to_zsh
+      fi
+    else
+      fancy_echo "Shell will not be changed."
+    fi
+    ;;
+  esac
+  shell_selected=true
+  reset_screen
+}
+
+install_gnupg() {
+  echo "  - Installing GNUPGP"
+  if ! brew_is_installed 'gnupg'; then
+    read -r -p "Would you like to install gnupg? [y/N] " response
+
+    case "$response" in
+    [yY][eE][sS] | [yY])
+      brew_confirm_install_or_upgrade 'gnupg'
+      brew_confirm_install_or_upgrade 'pinentry'
+      gpg_config
+      ;;
+    *)
+      fancy_echo "Not installing gnupg"
+      ;;
+    esac
+  else
+    echo "    - GNUPGP is already installed. Skipping installation ..."
+    gpg_config
+  fi
+}
+
+# Updates GPG config
+gpg_config() {
+  echo "  - Updating GPG config"
+  read -r -p "    - Would you like to update your GPG config?  (Existing configuration is backed up) [y/N] " response
+
+  case "$response" in
+  [yY][eE][sS] | [yY])
+    update_gpg_config
+    ;;
+  *)
+    echo "    - Not updating GPG config"
+    ;;
+  esac
+}
+
+update_gpg_config() {
+  gpg_file="$HOME/.gnupg/gpg.conf"
+  gpg_agent_file="$HOME/.gnupg/gpg-agent.conf"
+
+  output=$(gpg --list-secret-keys --keyid-format LONG 2>/dev/null)
+
+  if [ ! -n "$(gpg --list-secret-keys --keyid-format LONG | grep sec)" ]; then
+    read -r -p "    - You do not currently have a GPG key for signing your git commits.  Would you like to set one up now? [y/N] " response
+
+    case "$response" in
+    [yY][eE][sS] | [yY])
+      gpg --gen-key
+      ;;
+    *)
+      echo "    - Not creating GPG key, exiting GPG configuration"
+      ;;
+    esac
+  else
+    count=$(gpg --list-secret-keys --keyid-format LONG | grep sec | wc | awk '{gsub(/\t/, ""); print $1}')
+    echo "    - Currently you have $count GPG keys"
+  fi
+
+  if [ -n "$(gpg --list-secret-keys --keyid-format LONG | grep sec)" ]; then
+    if [ ! -f $gpg_file ]; then
+      echo "    - Creating $gpg_file"
+      touch $gpg_file
+    else
+      backup_gpg_file="$HOME/.gnupg/gpg.conf.old"
+      echo "    - Backing up $gpg_file to $backup_gpg_file"
+      mv $gpg_file $backup_gpg_file
+      echo "    - Creating $gpg_file"
+      touch $gpg_file
+    fi
+
+    if [ ! -f $gpg_agent_file ]; then
+      echo "    - Creating $gpg_agent_file"
+      touch $gpg_agent_file
+    else
+      backup_gpg_agent_file="$HOME/.gnupg/gpg-agent.conf.old"
+      echo "    - Backing up $gpg_agent_file to $backup_gpg_agent_file"
+      mv $gpg_agent_file $backup_gpg_agent_file
+      echo "    - Creating $gpg_agent_file"
+      touch $gpg_agent_file
+    fi
+
+    echo "    - Adding configuration to $gpg_agent_file"
+    if ! grep -Fqs "max-cache-ttl" "$gpg_agent_file"; then
+      printf "%s\n" "max-cache-ttl 28800" >>"$gpg_agent_file"
+    fi
+
+    if ! grep -Fqs "default-cache-ttl" "$gpg_agent_file"; then
+      printf "%s\n" "default-cache-ttl 900" >>"$gpg_agent_file"
+    fi
+
+    if ! grep -Fqs "pinentry-program" "$gpg_agent_file"; then
+      printf "%s\n" "pinentry-program /usr/local/bin/pinentry" >>"$gpg_agent_file"
+    fi
+
+    if ! grep -Fqs "enable-ssh-support" "$gpg_agent_file"; then
+      printf "%s\n" "enable-ssh-support" >>"$gpg_agent_file"
+    fi
+
+    keyarray=($(gpg --list-secret-keys --keyid-format LONG | grep sec | awk '{gsub(/[A-Za-z0-9]*\//, ""); print $2}'))
+
+    gpgkey=${keyarray[0]}
+    echo "    - You have a GPG key installed at $gpgkey"
+
+    echo "    - Adding configuration to $gpg_file"
+    if ! grep -Fqs "default-key $gpgkey" "$gpg_file"; then
+      printf "%s\n" "default-key $gpgkey" >>"$gpg_file"
+    fi
+
+    if ! grep -Fqs "use-agent" "$gpg_file"; then
+      printf "%s\n" "use-agent" >>"$gpg_file"
+    fi
+
+    append_to_shell 'export GPG_TTY=$(tty)'
+
+    read -r -p "    - Would you like to add the key $gpgkey to your global git configuration? [y/N] " response
+
+    case "$response" in
+    [yY][eE][sS] | [yY])
+      git config --global user.signingkey $gpgkey
+      ;;
+    *) ;;
+
+    esac
+
+    read -r -p "    - Would you like to configure git to sign all commits? [y/N] " response
+
+    case "$response" in
+    [yY][eE][sS] | [yY])
+      git config --global commit.gpgsign true
+      git config --global gpg.program gpg
+      ;;
+    *) ;;
+
+    esac
+
+    echo "    - You will need to make sure that this key is added to Github."
+
+    read -r -p "    - Would you like to copy the key into your clipboard and open the Github GPG page? [y/N] " response
+
+    case "$response" in
+    [yY][eE][sS] | [yY])
+      gpg --armor --export $gpgkey | pbcopy
+      open "https://github.com/settings/keys"
+      ;;
+    *) ;;
+
+    esac
+  else
+    echo "    - You do not have a GPG key for signing your git commits."
+  fi
+}
+
+# Checks whether the docker config has auths in it
+check_docker_login() {
+  if [ ! -f ~/.docker/config.json ]; then
+    echo "  - Please login to your docker account"
+    echo "==========="
+    docker login
+    echo "==========="
+  else
+    if grep -q 'auths": {}' ~/.docker/config.json; then
+      echo "  - Please login to your docker account"
+      echo "==========="
+      docker login
+      echo "==========="
+    fi
+  fi
+}
+
+# This checks whether the application is installed by calling brew cask list
+mas_is_installed() {
+  if [[ $(mas list | grep "$1") ]]; then
+    true
+  else
+    false
+  fi
+}
+
+install_docker_for_mac() {
+  echo "  - Setting up Docker"
+
+  if brew_cask_is_installed 'docker-toolbox'; then
+    echo "    - Removing Docker Toolbox"
+    echo "      - Removing docker images"
+    docker rm $(docker ps -a -q)
+    docker rmi -f $(docker images -q)
+    echo "      - Uninstalling docker-toolbox"
+    _=$(docker-machine rm default 2>/dev/null) || true
+    _=$(brew cask uninstall docker-toolbox 2>/dev/null) || true
+    sudo rm -rf $(which docker-machine) ~/.docker/machine
+    remove_from_shell 'eval $(docker-machine env)'
+  fi
+
+  if ! hash docker 2>/dev/null; then
+
+    install_single_cask_or_error "docker" "Docker For Mac"
+
+    if [ ! -f /Library/PrivilegedHelperTools/com.docker.vmnetd ]; then
+      echo "  - Copying com.docker.vmnted to PrivilegedHelperTools"
+      sudo mkdir -p /Library/PrivilegedHelperTools
+      sudo cp /Applications/Docker.app/Contents/Library/LaunchServices/com.docker.vmnetd /Library/PrivilegedHelperTools/
+      sudo chmod 544 /Library/PrivilegedHelperTools/com.docker.vmnetd
+    fi
+
+    if [ ! -f /Library/LaunchDaemons/com.docker.vmnetd.plist ]; then
+      echo "  - Copying com.docker.vmnetd.plist to LaunchDaemons"
+      sudo cp /Applications/Docker.app/Contents/Resources/com.docker.vmnetd.plist /Library/LaunchDaemons/
+      sudo chmod 644 /Library/LaunchDaemons/com.docker.vmnetd.plist
+      sudo launchctl load /Library/LaunchDaemons/com.docker.vmnetd.plist
+    fi
+  else
+    echo "    - Already using Docker For Mac. Skipping ..."
+  fi
+}
+
+default_writes() {
+  # Require password immediately after sleep or screen saver begins
+  defaults write com.apple.screensaver askForPassword -int 1
+  defaults write com.apple.screensaver askForPasswordDelay -int 0
+
+  # Show the main window when launching Activity Monitor
+  defaults write com.apple.ActivityMonitor OpenMainWindow -bool true
+
+  # Visualize CPU usage in the Activity Monitor Dock icon
+  defaults write com.apple.ActivityMonitor IconType -int 5
+
+  # Show all processes in Activity Monitor
+  defaults write com.apple.ActivityMonitor ShowCategory -int 0
+
+  # Sort Activity Monitor results by CPU usage
+  defaults write com.apple.ActivityMonitor SortColumn -string "CPUUsage"
+  defaults write com.apple.ActivityMonitor SortDirection -int 0
+
+  # Enable the automatic update check
+  defaults write com.apple.SoftwareUpdate AutomaticCheckEnabled -bool true
+
+  # Check for software updates daily, not just once per week
+  defaults write com.apple.SoftwareUpdate ScheduleFrequency -int 1
+}
+
+# Installs software, including git, docker-toolbox, slack and iterm2
+install_software() {
+  output="> Installing Base Software\n"
+
+  output="$output  - Installing mas\n"
+  echo -e $output
+  brew_confirm_install_or_upgrade 'mas'
+  reset_screen
+
+  output="$output  - Installing XCode\n"
+  echo -e $output
+
+  if ! mas_is_installed '497799835'; then
+
+    read -r -p "    - Would you like to install XCode? [y/N] " response
+
+    case "$response" in
+    [yY][eE][sS] | [yY])
+      mas install 497799835
+      ;;
+    *)
+      echo "    - Not installing XCode"
+      ;;
+    esac
+  else
+    echo "    - XCode already installed. Skipping ..."
+  fi
+  reset_screen
+
+  output="$output  - Installing git\n"
+  echo -e $output
+  brew_confirm_install_or_upgrade 'git'
+  reset_screen
+
+  output="$output  - Installing GNUPGP\n"
+  echo -e $output
+  install_gnupg
+  reset_screen
+
+  output="$output  - Installing iterm2\n"
+  echo -e $output
+  brew_cask_install_or_upgrade 'iterm2'
+  reset_screen
+
+  output="$output  - Installing jq\n"
+  echo -e $output
+  brew_confirm_install_or_upgrade 'jq'
+  reset_screen
+
+  output="$output  - Installing VS Code\n"
+  echo -e $output
+  brew_cask_install_or_upgrade 'visual-studio-code'
+  reset_screen
+
+  output="$output  - Installing Beyond Compare\n"
+  echo -e $output
+  brew_cask_install_or_upgrade 'beyond-compare'
+  reset_screen
+
+  output="$output  - Installing Docker for Mac\n"
+  echo -e $output
+  install_docker_for_mac
+  reset_screen
+
+  output="$output  - Installing rbenv\n"
+  echo -e $output
+  brew_confirm_install_or_upgrade 'rbenv'
+  append_to_shell "eval "$(rbenv init -)""
+  reset_screen
+
+  output="$output  - Installing rbenv-default-gems\n"
+  echo -e $output
+  brew_confirm_install_or_upgrade 'rbenv-default-gems'
+  reset_screen
+
+  output="$output  - Installing hub\n"
+  echo -e $output
+  brew_confirm_install_or_upgrade 'hub'
+  reset_screen
+
+  output="$output  - Installing trash\n"
+  echo -e $output
+  brew_confirm_install_or_upgrade 'trash'
+  reset_screen
+
+  output="$output  - Installing slack\n"
+  echo -e $output
+  brew_cask_install_or_upgrade 'slack'
+  reset_screen
+
+  append_to_shell "alias brewup='brew update; brew upgrade; brew prune; brew cleanup; brew doctor'"
+
+  default_writes
+
+  base_software_installed=true
+  reset_screen
+}

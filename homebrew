@@ -1,0 +1,207 @@
+#!/bin/bash
+# This gets the info and parses it
+brew_expand_alias() {
+  brew info "$1" 2>/dev/null | head -1 | awk '{gsub(/:/, ""); print $1}'
+}
+
+# This checks whether the application is installed by calling brew list
+brew_is_installed() {
+  local name="$(brew_expand_alias "$1")"
+
+  brew list -1 | grep -Fqx "$name"
+}
+
+# This checks whether the application is upgradeable by calling brw
+brew_is_upgradable() {
+  local name="$(brew_expand_alias "$1")"
+
+  ! brew outdated --quiet "$name" >/dev/null
+}
+
+# This checks whether the application is upgradeable by calling brw
+brew_cask_is_upgradable() {
+  local name="$(brew_cask_expand_alias "$1")"
+
+  ! brew cask outdated --quiet "$name" >/dev/null
+}
+
+# Cask installs swallowing output
+brew_cask() {
+  brew cask install "$1" 2>/dev/null
+}
+
+# This gets the info and parses it
+brew_cask_expand_alias() {
+  brew cask info "$1" 2>/dev/null | head -1 | awk '{gsub(/:/, ""); print $1}'
+}
+
+# This checks whether the application is installed by calling brew cask list
+brew_cask_is_installed() {
+  local name="$(brew_cask_expand_alias "$1")"
+
+  brew cask list -1 | grep -Fqx "$name"
+}
+
+# This installs a program or upgrades it if it is already installed
+brew_cask_install_or_upgrade() {
+  if brew_cask_is_installed "$1"; then
+    if brew_cask_is_upgradable "$1"; then
+
+      read -r -p "    - There is an update available for '$1'.  Would you like to update now? [y/N] " response
+      case "$response" in
+      [yY][eE][sS] | [yY])
+        echo "    - Upgrading $1 ..."
+        brew cask upgrade "$@"
+        ;;
+      *)
+        echo "    - Not updating $1"
+        ;;
+      esac
+
+    else
+      echo "    - Already using the latest version of $1. Skipping ..."
+    fi
+  else
+
+    read -r -p "    - Would you like to install '$1' now? [y/N] " response
+    case "$response" in
+    [yY][eE][sS] | [yY])
+      echo "    - Installing $1 ..."
+      brew cask install "$@"
+      ;;
+    *)
+      echo "    - Skipping installing $1"
+      ;;
+    esac
+
+  fi
+}
+
+# This installs a program or upgrades it if it is already installed
+brew_confirm_install_or_upgrade() {
+  if brew_is_installed "$1"; then
+    if brew_is_upgradable "$1"; then
+      read -r -p "    - There is an update available for '$1'.  Would you like to update now? [y/N] " response
+      case "$response" in
+      [yY][eE][sS] | [yY])
+        echo "    - Upgrading $1 ..."
+        brew upgrade "$@"
+        ;;
+      *)
+        echo "    - Not updating $1"
+        ;;
+      esac
+    else
+      echo "    - Already using the latest version of $1. Skipping ..."
+    fi
+  else
+    read -r -p "    - Would you like to install '$1' now? [y/N] " response
+    case "$response" in
+    [yY][eE][sS] | [yY])
+      echo "    - Installing $1 ..."
+      brew install "$@"
+      ;;
+    *)
+      echo "    - Skipping installing $1"
+      ;;
+    esac
+  fi
+}
+
+# Sets up homebrew (https://brew.sh/)
+setup_homebrew() {
+  fancy_echo "> Setting up homebrew"
+  echo ""
+
+  if [ ! -d "$HOME/.bin/" ]; then
+    mkdir "$HOME/.bin"
+  fi
+
+  HOMEBREW_PREFIX="/usr/local"
+
+  if [ -d "$HOMEBREW_PREFIX" ]; then
+    if ! [ -r "$HOMEBREW_PREFIX" ]; then
+      sudo chown -R "$LOGNAME:admin" /usr/local
+    fi
+  else
+    sudo mkdir "$HOMEBREW_PREFIX"
+    sudo chflags norestricted "$HOMEBREW_PREFIX"
+    sudo chown -R "$LOGNAME:admin" "$HOMEBREW_PREFIX"
+  fi
+
+  if ! command -v brew >/dev/null; then
+    echo "  - Installing Homebrew ..."
+    echo ""
+    curl -fsS \
+      'https://raw.githubusercontent.com/Homebrew/install/master/install' | ruby
+
+    append_to_shell '# recommended by brew doctor'
+
+    append_to_shell 'export PATH="/usr/local/bin:$PATH"' 1
+
+    export PATH="/usr/local/bin:$PATH"
+  else
+    echo "  - Homebrew already installed. Skipping ..."
+  fi
+
+  append_to_shell 'export PATH="$HOME/.bin:~/bin:$PATH"'
+
+  if brew list | grep -Fq brew-cask; then
+    fancy_echo "Uninstalling old Homebrew-Cask ..."
+    brew uninstall --force brew-cask
+  fi
+
+  echo "  - Updating Homebrew formulas"
+  echo "    - $(brew update)"
+  echo "  - Disabling Homebrew analytics"
+  brew analytics off
+  echo "    - Disabled"
+
+  echo "  - Setting up brew cask"
+  brew cask list 1>/dev/null
+  brew tap homebrew/services
+
+  homebrew=true
+  reset_screen
+}
+
+install_single_cask() {
+  cask=$1
+  name=$2
+  echo "  - Installing $name"
+  if ! brew_cask_is_installed "$cask"; then
+    read -r -p "Would you like to install $name? [y/N] " response
+
+    case "$response" in
+    [yY][eE][sS] | [yY])
+      brew_cask $cask
+      ;;
+    *)
+      fancy_echo "Not installing $name"
+      ;;
+    esac
+  else
+    echo "    - $name already installed. Skipping ..."
+  fi
+}
+
+install_single_cask_or_error() {
+  cask=$1
+  name=$2
+  echo "  - Installing $name"
+  if ! brew_cask_is_installed "$cask"; then
+    read -r -p "Would you like to install $name? [y/N] " response
+
+    case "$response" in
+    [yY][eE][sS] | [yY])
+      brew_cask $cask
+      ;;
+    *)
+      fancy_echo "Not installing $name"
+      exit 1
+      ;;
+    esac
+  else
+    echo "    - $name already installed. Skipping ..."
+  fi
+}

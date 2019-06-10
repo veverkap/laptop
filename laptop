@@ -1,0 +1,185 @@
+#!/bin/bash
+set -e
+CURRENT_DIR=$PWD
+DIR="${BASH_SOURCE%/*}"
+if [[ ! -d "$DIR" ]]; then DIR="$PWD"; fi
+. "$DIR/software"
+. "$DIR/homebrew"
+
+repos=(operations ironboard phoeyonce file_system_monitor phoeyonce-student-ide-dockerfile phoeyonce-student-base-dockerfile phoeyonce-student-jupyter-dockerfile docs flatchat ironbroker-v2 learn_slack_bot)
+
+shell_selected=false
+homebrew=false
+base_software_installed=false
+
+reset_screen() {
+  clear
+
+  echo "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh"
+  echo "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh   INITIALIZATION SCRIPT  hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh"
+  echo "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh        VERSION 1.1       hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh"
+  echo "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh"
+  echo ""
+  if $shell_selected; then
+    echo " 👍  Shell selected as $SHELL"
+  else
+    echo " ➡️  Select your shell"
+  fi
+  if $homebrew; then
+    echo " 👍  Homebrew installed and up to date"
+  else
+    echo " ➡️  Install/update Homebrew"
+  fi
+  if $base_software_installed; then
+    echo " 👍  Base software installed and up to date"
+  else
+    echo " ➡️  Install/update Base software"
+  fi
+
+  echo "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh"
+  echo ""
+}
+
+# Prints the echo prettier
+fancy_echo() {
+  local fmt="$1"
+  shift
+
+  # shellcheck disable=SC2059
+  printf "\n$fmt\n" "$@"
+}
+
+# Appends to either .zshrc or .bashrc
+append_to_shell() {
+  local text="$1" zshrc
+  local skip_new_line="${2:-0}"
+
+  case "$SHELL" in
+  */zsh)
+    # USING ZSH
+    if [ -w "$HOME/.zshrc.local" ]; then
+      rcfile="$HOME/.zshrc.local"
+    else
+      if [ ! -f "$HOME/.zshrc" ]; then
+        touch "$HOME/.zshrc"
+      fi
+      rcfile="$HOME/.zshrc"
+    fi
+    ;;
+  *)
+    # ASSUMING BASH
+    rcfile="$HOME/.bashrc"
+    ;;
+  esac
+
+  if ! grep -Fqs "$text" "$rcfile"; then
+    if [ "$skip_new_line" -eq 1 ]; then
+      printf "%s\n" "$text" >>"$rcfile"
+    else
+      printf "\n%s\n" "$text" >>"$rcfile"
+    fi
+  fi
+}
+
+# Removes from either .zshrc or .bashrc
+remove_from_shell() {
+  local text="$1"
+  local skip_new_line="${2:-0}"
+
+  case "$SHELL" in
+  */zsh)
+    # USING ZSH
+    if [ -w "$HOME/.zshrc.local" ]; then
+      rcfile="$HOME/.zshrc.local"
+    else
+      if [ ! -f "$HOME/.zshrc" ]; then
+        touch "$HOME/.zshrc"
+      fi
+      rcfile="$HOME/.zshrc"
+    fi
+    ;;
+  *)
+    # ASSUMING BASH
+    rcfile="$HOME/.bashrc"
+    ;;
+  esac
+
+  if grep -Fqs "$text" "$rcfile"; then
+    grep -v "$text" $rcfile >"backup"
+    mv "backup" $rcfile
+  fi
+
+  sed '/^$/d' $rcfile >"backup"
+  mv "backup" $rcfile
+}
+
+maxfiles_low() {
+  if [ -n "$(launchctl limit maxfiles | awk '{gsub(/\t/, ""); print $2}' | grep 256)" ]; then
+    true
+  else
+    false
+  fi
+}
+
+setup_ssh_key() {
+  echo "> Generating SSH Key for $USER"
+  FILE="$HOME/.ssh/id_rsa.pub"
+
+  if [ -e $FILE ]; then
+    read -r -p "  - The SSH key '$FILE' already exists.  Would you like to use this key? [y/N] " response
+
+    case "$response" in
+    [yY][eE][sS] | [yY]) ;;
+
+    *)
+      create_ssh_key
+      ;;
+    esac
+  else
+    create_ssh_key
+  fi
+
+  echo "  - Adding your key to the ssh-agent 👍"
+  eval "$(ssh-agent -s)" >/dev/null
+  echo "  - Copying your key to the clipboard... 👍"
+  pbcopy <~/.ssh/id_rsa.pub
+
+  read -r -p "  - Would you like to add your key to GitHub now? [y/N] " response
+
+  case "$response" in
+  [yY][eE][sS] | [yY])
+    open "https://github.com/settings/ssh/new"
+    ;;
+  *)
+    echo "  - Okay, you can copy it from $HOME/.ssh/id_rsa.pub later."
+    sleep 1
+    ;;
+  esac
+  ssh-add -K ~/.ssh/id_rsa
+  ssh_key_generated=true
+  reset_screen
+}
+
+create_ssh_key() {
+  echo ""
+  echo "> Creating SSH Key"
+
+  read -r -p "  - What is your email address? " response
+  echo "  - Calling ssh-keygen - please make sure to save it to $HOME/.ssh/id_rsa"
+  echo ""
+  echo "  =========="
+  echo ""
+  ssh-keygen -t rsa -b 4096 -C "$response"
+  echo ""
+  echo "  =========="
+  echo ""
+}
+
+clear
+reset_screen
+change_shell
+setup_homebrew
+install_software
+setup_ssh_key
+reset_screen
+fancy_echo "****** setup complete."
